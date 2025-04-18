@@ -10,9 +10,7 @@ WORKDIR /app
 COPY . /app
 
 # Install production dependencies.
-# If you have a requirements.txt file, you can use it to install the dependencies.
-# RUN pip install -r requirements.txt
-RUN pip install Flask gunicorn
+RUN pip install -r requirements.txt
 
 # Run the web service on container startup. Here we use the gunicorn
 # server, with one worker process and 8 threads.
