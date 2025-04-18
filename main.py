@@ -30,45 +30,48 @@ def get_compute_engine_instances(config: Dict[str, str]) -> List[compute_v1.Inst
     zone = config.get('zone')
 
     if not domain:
-        raise ValueError("Domain must be specified in the config.")
+        logger.error("Domain must be specified in the config.")
+        raise ValueError("Domain must be specified in the config")
     if not project_id:
         project_id = default_project_id
         logger.info(f"Using default project_id: {project_id}")
     
     instances = []  # Initialize instances list
     try:
-        if zone:  # If zone is specified, list instances in that zone
+        if zone:
             logger.info(f"Fetching instances in project: {project_id}, zone: {zone} for domain: {domain}")
             request = compute_v1.ListInstancesRequest(project=project_id, zone=zone)
             logger.info(f"Requesting instances in project: {request}")
             agg_instances = compute_client.list(request=request)
-            logger.info(f"agg_instances fetched: {agg_instances}")
-            for instance in agg_instances:
-                if instance.name.endswith(domain):
+            #logger.info(f"agg_instances fetched: {agg_instances}")
+            for instance in agg_instances:                
+                logger.info(f"Checking instance: {instance.name} against domain: {domain}")
+                if instance.name is not None:
                     instances.append(instance)
-        else:  # Otherwise, list instances across all zones
+        else:
             logger.info(f"Fetching instances in all zones for project: {project_id} with domain: {domain}")
             request = compute_v1.AggregatedListInstancesRequest(project=project_id)
             logger.info(f"Requesting instances in project: {request}")
             agg_instances = compute_client.aggregated_list(request=request)
-            logger.info(f"agg_instances fetched: {agg_instances}")
+            #logger.info(f"agg_instances fetched: {agg_instances}")
             for zone_name, response in agg_instances:
-                if response.instances:
+                if response.instances:                    
                     for instance in response.instances:
-                        if instance.name.endswith(domain):
+                        logger.info(f"Checking instance: {instance.name} against domain: {domain}")
+                        if instance.name is not None:
                             instances.append(instance)
-        logger.info(f"Found {len(instances)} instances matching domain: {domain}")
-        return instances
+        logger.info(f"Found {len(instances)} instances")
+        # Format the instance data to include only necessary information (name, zone, machine_type, status).
+        instance_list = [{'name': instance.name,
+                          'zone': instance.zone.split('/')[-1],  # Extract zone name from URL
+                          'machine_type': instance.machine_type.split('/')[-1],  # Extract machine type from URL
+                          'status': instance.status}
+                         for instance in instances]
+        logger.info(f"Returning instances: {instance_list}")
+        return  instance_list
     except Exception as e:
         logger.error(f"Error fetching instances: {e}")
         raise
-
-
-@app.route('/', methods=['GET'])
-def hello_world():
-    """A simple Hello World route."""
-    name = request.args.get("name", "World")
-    return f"Hello, {name}!"
 
 
 @app.route('/list_vms', methods=['POST'])
@@ -76,7 +79,7 @@ def get_instances():
     """API endpoint to list Compute Engine instances."""
     logger.info("Received request at /list_vms")
     try:
-        # Parse JSON data from request
+        # Parse JSON data from request        
         data = request.get_json()
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
@@ -84,15 +87,8 @@ def get_instances():
         # Call the function to retrieve instances based on the provided data.
         instances = get_compute_engine_instances(data)
 
-        # Format the instance data to include only necessary information (name, zone, machine_type, status).
-        instance_list = [{'name': instance.name,
-                          'zone': instance.zone.split('/')[-1],  # Extract zone name from URL
-                          'machine_type': instance.machine_type.split('/')[-1],  # Extract machine type from URL
-                          'status': instance.status}
-                         for instance in instances]
-
-        logger.info(f"Returning {len(instance_list)} instances.")
-        return jsonify({'instances': instance_list}), 200
+        logger.info(f"Returning {len(instances)} instances.")
+        return jsonify({'instances': instances}), 200
     except ValueError as e:
         logger.error(f"ValueError: {e}")
         return jsonify({'error': str(e)}), 400
