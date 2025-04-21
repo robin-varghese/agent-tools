@@ -208,6 +208,7 @@ def get_instances():
 @app.route('/delete_vms', methods=['POST'])
 def delete_instances():
     """API endpoint to delete Compute Engine instances."""
+    json_results = []  # Initialize json_results here
     try:
         data = request.get_json()
         if not data or 'project_id' not in data or 'instance_id' not in data:
@@ -216,6 +217,7 @@ def delete_instances():
         project_id = data['project_id']
         instance_id = data['instance_id']
         zone = data['zone']
+        logging.info(f"Attempting to delete instances in project={project_id} in zone={zone} instanceid= {instance_id}.")
         #zone = data.get('zone', "us-central1-a")  # Get zone from request, default to "us-central1-a"
 
         if isinstance(instance_id, str) and instance_id == "ALL":
@@ -223,15 +225,15 @@ def delete_instances():
             logging.info(f"Attempting to delete ALL instances in project {project_id} in zone {zone}.")
             # In a real scenario, you would first list all instances and then delete them.
             return jsonify({'message': f'Attempting to delete ALL instances in project {project_id} in zone {zone}.  (Listing and deletion of all instances needs to be implemented)'}), 200  # Indicate success for now, as the logic isn't fully implemented here
-        elif isinstance(instance_id, list):
+        elif isinstance(instance_id, str):
             logging.info(f"Attempting to delete one instances in project {project_id} in zone {zone}.")
             results = delete_compute_engine_instance(project_id, instance_id, zone)
             #for instance_id in instance_id:
             if delete_compute_engine_instance(project_id, instance_id, zone):
-                results.append({'instance_id': instance_id, 'status': 'deleted'})
+                json_results.append({'instance_id': instance_id, 'status': 'deleted'})
             else:
-                results.append({'instance_id': instance_id, 'status': 'failed'})
-            return jsonify({'results': results}), 200
+                json_results.append({'instance_id': instance_id, 'status': 'failed'})
+            return jsonify({'results': json_results}), 200
         else:
             return jsonify({'error': 'Invalid instance_id format. Use a list of IDs or "ALL".'}), 400
     except Exception as e:
