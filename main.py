@@ -210,28 +210,30 @@ def delete_instances():
     """API endpoint to delete Compute Engine instances."""
     try:
         data = request.get_json()
-        if not data or 'project_id' not in data or 'instance_ids' not in data:
-            return jsonify({'error': 'Invalid request format. Missing project_id or instance_ids.'}), 400
+        if not data or 'project_id' not in data or 'instance_id' not in data:
+            return jsonify({'error': 'Invalid request format. Missing project_id or instance_id.'}), 400
 
         project_id = data['project_id']
-        instance_ids = data['instance_ids']
-        zone = data.get('zone', "us-central1-a")  # Get zone from request, default to "us-central1-a"
+        instance_id = data['instance_id']
+        zone = data['zone']
+        #zone = data.get('zone', "us-central1-a")  # Get zone from request, default to "us-central1-a"
 
-        if isinstance(instance_ids, str) and instance_ids == "ALL":
+        if isinstance(instance_id, str) and instance_id == "ALL":
             # Handle wildcard deletion (delete all instances)
             logging.info(f"Attempting to delete ALL instances in project {project_id} in zone {zone}.")
             # In a real scenario, you would first list all instances and then delete them.
             return jsonify({'message': f'Attempting to delete ALL instances in project {project_id} in zone {zone}.  (Listing and deletion of all instances needs to be implemented)'}), 200  # Indicate success for now, as the logic isn't fully implemented here
-        elif isinstance(instance_ids, list):
-            results = delete_compute_engine_instance(project_id, instance_ids, zone)
-            #for instance_id in instance_ids:
+        elif isinstance(instance_id, list):
+            logging.info(f"Attempting to delete one instances in project {project_id} in zone {zone}.")
+            results = delete_compute_engine_instance(project_id, instance_id, zone)
+            #for instance_id in instance_id:
             if delete_compute_engine_instance(project_id, instance_id, zone):
                 results.append({'instance_id': instance_id, 'status': 'deleted'})
             else:
                 results.append({'instance_id': instance_id, 'status': 'failed'})
             return jsonify({'results': results}), 200
         else:
-            return jsonify({'error': 'Invalid instance_ids format. Use a list of IDs or "ALL".'}), 400
+            return jsonify({'error': 'Invalid instance_id format. Use a list of IDs or "ALL".'}), 400
     except Exception as e:
         logging.exception("Error processing delete request.")
         return jsonify({'error': f'Error processing request: {e}'}), 500
