@@ -4,8 +4,8 @@ from googleapiclient import discovery
 import os
 from google.cloud import compute_v1
 from google.auth import default
-from typing import Dict, List
-
+from typing import Dict, List, Any
+import requests
 import logging
 
 app = Flask(__name__)
@@ -15,146 +15,69 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def get_compute_engine_instances(config: Dict[str, str]) -> List[compute_v1.Instance]:
-    # Initialize Google Cloud credentials and the Compute Engine API client
-    credentials, default_project_id = default()
-    compute_client = compute_v1.InstancesClient(credentials=credentials)
-    """Retrieves a list of Compute Engine instances for a given domain, optionally filtered by project and zone.
+def get_compute_engine_instances(project_id: str, zone:str) -> List[Dict[str, Any]]: # Updated return type hint
+    """
+    Retrieves all GCE instances in a project and returns them as a list of dictionaries.
 
     Args:
-        config: A dictionary containing the configuration parameters. Required keys: - domain: The domain to filter instances by. Optional keys: - project_id: The ID of the Google Cloud project. - zone: The zone to filter instances by.
+        project_id: project ID or project number of the Cloud project you want to use.
 
     Returns:
-        A list of Compute Engine instance objects.
+        A list where each item is a dictionary containing details for one instance, e.g.:
+        {
+            "project_id": "your-project-id",
+            "zone": "us-central1-c",
+            "instance_id": "instance-name-1",
+            "machine_type": "n2-standard-2"
+        }
     """
-
-    # Extract domain, project_id, and zone from config; use defaults or raise error if necessary
-    domain = config.get('domain')
-    project_id = config.get('project_id')
-    zone = config.get('zone')
-
-    if not domain:
-        logger.error("Domain must be specified in the config.")
-        raise ValueError("Domain must be specified in the config")
-    if not project_id:
-        project_id = default_project_id
-        logger.info(f"Using default project_id: {project_id}")
+    instance_client = compute_v1.InstancesClient()
+    request = compute_v1.AggregatedListInstancesRequest()
+    logger.info(f"Project ID: {project_id}")
+    request.project = project_id
+    #request.zone = zone
     
-    instances = []  # Initialize instances list
-    try:
-        if zone:
-            logger.info(f"Fetching instances in project: {project_id}, zone: {zone} for domain: {domain}")
-            request = compute_v1.ListInstancesRequest(project=project_id, zone=zone)
-            logger.info(f"Requesting instances in project: {request}")
-            agg_instances = compute_client.list(request=request)
-            #logger.info(f"agg_instances fetched: {agg_instances}")
-            for instance in agg_instances:                
-                logger.info(f"Checking instance: {instance.name} against domain: {domain}")
-                if instance.name is not None:
-                    instances.append(instance)
-        else:
-            logger.info(f"Fetching instances in all zones for project: {project_id} with domain: {domain}")
-            request = compute_v1.AggregatedListInstancesRequest(project=project_id)
-            logger.info(f"Requesting instances in project: {request}")
-            agg_instances = compute_client.aggregated_list(request=request)
-            #logger.info(f"agg_instances fetched: {agg_instances}")
-            for zone_name, response in agg_instances:
-                if response.instances:                    
-                    for instance in response.instances:
-                        logger.info(f"Checking instance: {instance.name} against domain: {domain}")
-                        if instance.name is not None:
-                            instances.append(instance)
-        logger.info(f"Found {len(instances)} instances")
-        # Format the instance data to include only necessary information (name, zone, machine_type, status).
-        instance_list = [{'name': instance.name,
-                          'zone': instance.zone.split('/')[-1],  # Extract zone name from URL
-                          'machine_type': instance.machine_type.split('/')[-1],  # Extract machine type from URL
-                          'status': instance.status}
-                         for instance in instances]
-        logger.info(f"Returning instances: {instance_list}")
-        return  instance_list
-    except Exception as e:
-        logger.error(f"Error fetching instances: {e}")
-        raise
-def get_compute_engine_instances(config: Dict[str, str]) -> List[dict]:
-    # Initialize Google Cloud credentials and the Compute Engine API client.
-    credentials, default_project_id = default()
-    compute_client = compute_v1.InstancesClient(credentials=credentials)
-    """Retrieves a list of Compute Engine instances for a given domain,
-    optionally filtered by project and zone.
+    # Use the `max_results` parameter to limit the number of results that the API returns per response page.
+    # The client library handles pagination automatically regardless.
+    request.max_results = 50
 
-    Args:
-        config: A dictionary containing the configuration parameters.
-            Required keys:
-                - domain: The domain to filter instances by.
-            Optional keys:
-                - project_id: The ID of the Google Cloud project.
-                - zone: The zone to filter instances by.
+    agg_list = instance_client.aggregated_list(request=request)
 
-    Returns:
-        A list of Compute Engine instance objects.
-    """
-    logging.info("Entering get_compute_engine_instances")
-    logging.info(f"Config: {config}")
+    # Initialize an empty list to hold the instance dictionaries
+    instances_list = []
+    logger.info("Instances found:")
 
-    # Extract the domain from the config; raise an error if not provided.
-    domain = config.get("domain")
-    if not domain:
-        logging.error("Domain not provided in config")
-        raise ValueError("The 'domain' key is required in the config dictionary.")
+    # Iterate through zones and the responses containing instances for each zone
+    for zone, response in agg_list:
+        if response.instances:
+            # Extract the short zone name (e.g., "us-central1-a" from "zones/us-central1-a")
+            # Check if zone is not empty before splitting
+            short_zone_name = zone.split('/')[-1] if zone else "unknown_zone"
 
-    # Determine the project ID; use the provided one or the default.
-    project_id = config.get("project_id") or default_project_id
-    logging.info(f"Using project_id: {project_id}")
+            logger.info(f" {zone}:") # Keep console logging for info
 
-    # Get the zone from the config, if provided.
-    zone = config.get("zone")
-    logging.info(f"Zone: {zone}")
+            # Iterate through each instance found in the current zone
+            for instance in response.instances:
+                # Extract the short machine type name from the full URL path
+                # e.g., "n2-standard-2" from ".../machineTypes/n2-standard-2"
+                machine_type_name = instance.machine_type.split('/')[-1] if instance.machine_type else "unknown_type"
 
-    # Prepare the request to list instances. If a zone is specified, list instances in that zone.
-    # Otherwise, list instances across all zones in the project.
-    if zone:
-        logging.info(f"Listing instances in zone: {zone}")
-        request = compute_v1.ListInstancesRequest(project=project_id, zone=zone)
-    else:
-        logging.info("Listing instances across all zones")
-        request = compute_v1.AggregatedListInstancesRequest(project=project_id)
+                logger.info(f" - {instance.name} ({machine_type_name})") # Keep console logging for info
 
-    instances = []
-    # Process the list of instances based on whether a specific zone was requested.
-    if zone:
-        logging.info("Processing instances from a specific zone")
-        page_result = compute_client.list(request=request)
-        for response in page_result:
-            # Filter instances by the domain.
-            for instance in response.items:
-                logging.info(f"Checking instance: {instance.name}, Domain: {domain}")
-                if instance.name is not None:
-                    instances.append({
-                        'name': instance.name,
-                        'zone': instance.zone,
-                        'machine_type': instance.machine_type,
-                        'status': instance.status
-                    })
-    # If no specific zone was requested, iterate through all zones.
-    else:
-        logging.info("Processing instances across all zones")
-        page_result = compute_client.aggregated_list(request=request)
-        for zone, response in page_result.items():
-            if response.instances:
-                for instance in response.instances:
-                    logging.info(f"Checking instance: {instance.name}, Domain: {domain}")
-                    if instance.name is not None:
-                        instances.append({
-                            'name': instance.name,
-                            'zone': instance.zone,
-                            'machine_type': instance.machine_type,
-                            'status': instance.status
-                        })
+                # Create the dictionary for the current instance
+                instance_data = {
+                    "project_id": project_id,
+                    "zone": short_zone_name,
+                    # Using instance name as ID. Use instance.id for the numerical ID if needed.
+                    "instance_id": instance.name,
+                    "machine_type": machine_type_name
+                }
+                # Add the dictionary to our results list
+                instances_list.append(instance_data)
+    logger.info(f"final list: {instances_list}");
+    # Return the final list of dictionaries
+    return instances_list
 
-    logging.info(f"Returning {len(instances)} instances")
-    logging.info("Exiting get_compute_engine_instances")
-    return instances
 def delete_compute_engine_instance(project_id: str, instance_id: str, zone: str) -> bool:
     """Deletes a Google Compute Engine instance.
 
@@ -194,7 +117,10 @@ def get_instances():
             return jsonify({"error": "No JSON data provided"}), 400
 
         # Call the function to retrieve instances based on the provided data.
-        instances = get_compute_engine_instances(data)
+        project_id = data['project_id']
+        zone = data['zone']
+        logging.info(f"Attempting to list instances in project={project_id} in zone={zone}.")
+        instances = get_compute_engine_instances(project_id,zone)
 
         logger.info(f"Returning {len(instances)} instances.")
         return jsonify({'instances': instances}), 200
